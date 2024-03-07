@@ -4,7 +4,6 @@
 		<title>three.js - pointerlock controls</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
-		<link type="text/css" rel="stylesheet" href="main.css">
 		<style>
 			#blocker {
 				position: absolute;
@@ -56,11 +55,25 @@
 			import * as THREE from 'three';
 
 			import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 			let camera, scene, renderer, controls;
-
+			const allActions = [];
 			const objects = [];
 
+			let mixer, model, skeleton;
+			let numAnimations;
+			const baseActions = {
+				idle: { weight: 1 },
+				walk: { weight: 0 },
+				run: { weight: 0 }
+			};
+			const additiveActions = {
+				sneak_pose: { weight: 0 },
+				sad_pose: { weight: 0 },
+				agree: { weight: 0 },
+				headShake: { weight: 0 }
+			};
 			let raycaster;
 
 			let moveForward = false;
@@ -77,7 +90,19 @@
 
 			init();
 			animate();
+			function setWeight( action, weight ) {
 
+				action.enabled = true;
+				action.setEffectiveTimeScale( 1 );
+				action.setEffectiveWeight( weight );
+
+				}
+			function activateAction( action ) {
+				const clip = action.getClip();
+				const settings = baseActions[ clip.name ] || additiveActions[ clip.name ];
+				setWeight( action, settings.weight );
+				action.play();
+			}
 			function init() {
 
 				camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 1000 );
@@ -182,47 +207,63 @@
 				document.addEventListener( 'keydown', onKeyDown );
 				document.addEventListener( 'keyup', onKeyUp );
 
+
+				const loader = new GLTFLoader();
+				loader.load( 'Xbot.glb', function ( gltf ) {
+					model = gltf.scene;
+					scene.add( model );
+					model.traverse( function ( object ) {
+						if ( object.isMesh ) object.castShadow = true;
+					} );
+					skeleton = new THREE.SkeletonHelper( model );
+					skeleton.visible = false;
+					scene.add( skeleton );
+
+					const animations = gltf.animations;
+					mixer = new THREE.AnimationMixer( model );
+
+					numAnimations = animations.length;
+
+					for ( let i = 0; i !== numAnimations; ++ i ) {
+
+						let clip = animations[ i ];
+						const name = clip.name;
+
+						if ( baseActions[ name ] ) {
+
+							const action = mixer.clipAction( clip );
+							activateAction( action );
+							baseActions[ name ].action = action;
+							allActions.push( action );
+
+						} else if ( additiveActions[ name ] ) {
+
+							// Make the clip additive and remove the reference frame
+
+							THREE.AnimationUtils.makeClipAdditive( clip );
+
+							if ( clip.name.endsWith( '_pose' ) ) {
+
+								clip = THREE.AnimationUtils.subclip( clip, clip.name, 2, 3, 30 );
+
+							}
+
+							const action = mixer.clipAction( clip );
+							activateAction( action );
+							additiveActions[ name ].action = action;
+							allActions.push( action );
+
+						}
+
+					}
+					animate();
+				});
+
+
 				raycaster = new THREE.Raycaster( new THREE.Vector3(), new THREE.Vector3( 0, - 1, 0 ), 0, 10 );
 
-				// floor
 
-				let floorGeometry = new THREE.PlaneGeometry( 100, 100, 100, 100 );
-				floorGeometry.rotateX( - Math.PI / 2 );
-
-				// vertex displacement
-
-				let position = floorGeometry.attributes.position;
-
-				for ( let i = 0, l = position.count; i < l; i ++ ) {
-
-					vertex.fromBufferAttribute( position, i );
-
-					vertex.x += Math.random() * 20 - 10;
-					vertex.y += Math.random() * 2;
-					vertex.z += Math.random() * 20 - 10;
-
-					position.setXYZ( i, vertex.x, vertex.y, vertex.z );
-
-				}
-
-				floorGeometry = floorGeometry.toNonIndexed(); // ensure each face has unique vertices
-
-				position = floorGeometry.attributes.position;
-				const colorsFloor = [];
-
-				for ( let i = 0, l = position.count; i < l; i ++ ) {
-
-					color.setHSL( Math.random() * 0.3 + 0.5, 0.75, Math.random() * 0.25 + 0.75, THREE.SRGBColorSpace );
-					colorsFloor.push( color.r, color.g, color.b );
-
-				}
-
-				floorGeometry.setAttribute( 'color', new THREE.Float32BufferAttribute( colorsFloor, 3 ) );
-
-				const floorMaterial = new THREE.MeshBasicMaterial( { vertexColors: true } );
-
-				const floor = new THREE.Mesh( floorGeometry, floorMaterial );
-				scene.add( floor );
+				let position;
 
 				// objects
 
