@@ -331,6 +331,10 @@
 
 				const time = performance.now();
 
+				if (model) {
+					model.position.y += 0.0001;
+				}
+
 				// if ( controls.isLocked === true ) {
 
 				// 	raycaster.ray.origin.copy( controls.getObject().position );
